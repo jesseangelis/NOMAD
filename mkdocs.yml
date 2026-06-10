@@ -1,0 +1,44 @@
+site_name: NOMAD
+site_description: NMF-based prOtein Modeling and AnDlysis
+repo_url: https://github.com/example/nomad
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: black
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+
+nav:
+  - Home: index.md
+  - Differential Expression: differential_expression.md
+  - Dose-Response: dose_response.md
+  - Statistics: statistics.md
+  - API Reference: api.md

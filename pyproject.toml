@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nomad"
+version = "0.0.1"
+description = "NMF-based prOtein Modeling and Analysis (NOMAD) for mass spectrometry data"
+readme = "README.md"
+authors = [
+  { name = "J. Angelis", email = "j.angelis@example.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "networkx",
+    "numpy",
+    "numba",
+    "polars",
+    "plotly",
+    "scipy",
+    "statsmodels",
+    "torch",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "cupy-cuda12x",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pandas",
+    "ipykernel",
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+]
+
+[project.scripts]
+nomad = "nomad.nomad:main"
+
+[project.urls]
+"Homepage" = "https://github.com/jesseangelis/NOMAD"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: fast, isolated unit tests (no GPU, no network, no large fixtures)",
+    "integration: end-to-end tests requiring a full pipeline run (slow)",
+    "slow: tests that take more than a few seconds",
+]
+addopts = "-ra -q --tb=short"
+testpaths = ["tests"]
