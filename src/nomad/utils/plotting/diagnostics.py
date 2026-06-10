@@ -21,7 +21,7 @@ class DiagnosticsPlot:
         cv_data: List[Tuple[float, float]],
         rep_data: Optional[List[Tuple[float, float]]] = None,
         rs_data: Optional[List[Tuple[float, float]]] = None,
-        output_dir: Optional[str] = "plots",
+        output_dir: Optional[str] = "artifacts/plots",
     ) -> go.Figure:
         """Creates a 3x4 grid of scatter plots for NMF diagnostics including specific-precursor subsets.
 

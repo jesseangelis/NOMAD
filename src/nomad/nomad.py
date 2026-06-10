@@ -43,7 +43,7 @@ class Nomad:
         self,
         metadata: Optional[Union[str, pl.DataFrame]] = None,
         num_workers: Optional[int] = None,
-        db_path: str = ".nomad_results.sqlite",
+        db_path: str = "artifacts/nomad_results.sqlite",
         _preserve_db: bool = False,
     ) -> None:
         """Initializes the NOMAD instance.
@@ -72,6 +72,9 @@ class Nomad:
         if not _preserve_db and os.path.exists(db_path):
             os.remove(db_path)
             logger.info("Cleared stale database at %s — starting fresh.", db_path)
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         db.init_db(self.db_path)
 
     @classmethod
@@ -214,7 +217,7 @@ class Nomad:
             self.graph, protein, self.metadata, bottom_right, db_path=self.db_path
         )
 
-    def plot_performance(self, output_dir: Optional[str] = "plots") -> go.Figure:
+    def plot_performance(self, output_dir: Optional[str] = "artifacts/plots") -> go.Figure:
         """Generates NMF deconvolution diagnostic plots (LOO and Replicates).
 
         Args:
@@ -238,8 +241,8 @@ def main():
     parser.add_argument("--fasta", "-f", required=True, help="Path to FASTA database")
     parser.add_argument("--evidence", "-e", required=True, help="Path to combined_ion.tsv")
     parser.add_argument("--metadata", "-m", default="experiment/data/dose_metadata.csv", help="Path to metadata CSV")
-    parser.add_argument("--out", "-o", default="nomad_quant.tsv", help="Path to output quantification TSV")
-    parser.add_argument("--db", "-d", default=".nomad_results.sqlite", help="Path to SQLite database")
+    parser.add_argument("--out", "-o", default="artifacts/nomad_quant.tsv", help="Path to output quantification TSV")
+    parser.add_argument("--db", "-d", default="artifacts/nomad_results.sqlite", help="Path to SQLite database")
     parser.add_argument("--workers", "-w", type=int, default=None, help="Number of parallel workers")
     args = parser.parse_args()
 
@@ -262,6 +265,9 @@ def main():
     fixed_cols = ["protein", "gene_symbol", "entry_name", "description", "n_proteins"]
     other_cols = [c for c in nm.quant_df.columns if c not in fixed_cols and c != "structural_specificity"]
     out_df = nm.quant_df.select(fixed_cols + other_cols)
+    out_dir = os.path.dirname(args.out)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     out_df.write_csv(args.out, separator="\t")
     print(f"[+] Output written to: {args.out}")
 
