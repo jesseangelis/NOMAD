@@ -1,133 +1,117 @@
+"""Unit tests for nomad.utils.fasta_parser.FastaParser."""
 
-import pytest
+import gzip
+
 import networkx as nx
-import tempfile
-import os
+import pytest
+
 from nomad.utils.fasta_parser import FastaParser
 
-@pytest.fixture
-def empty_graph():
-    return nx.DiGraph()
 
-@pytest.fixture
-def sample_fasta():
-    content = """>sp|P12345|PROT1_HUMAN Protein 1
-MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF
->sp|P67890|PROT2_HUMAN Protein 2
-MKAWLLLLLLVGLQSWYSGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF
-"""
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.fasta') as f:
-        f.write(content)
-        path = f.name
-    yield path
-    os.remove(path)
+@pytest.mark.unit
+def test_init_resolves_path(empty_graph, tmp_path):
+    """Verifies that FastaParser resolves the given path to an absolute path."""
+    fasta_file = tmp_path / "test.fasta"
+    fasta_file.write_text(">sp|P1|NAME\nAAAA\n")
 
-def test_fasta_parser_init(empty_graph, sample_fasta):
-    parser = FastaParser(empty_graph, sample_fasta)
-    assert parser.g == empty_graph
+    parser = FastaParser(empty_graph, str(fasta_file))
+
     assert parser.file_path == parser.file_path.resolve()
 
-def test_fasta_parser_init_filenotfound(empty_graph):
+
+@pytest.mark.unit
+def test_init_raises_on_missing_file(empty_graph):
+    """Verifies that FastaParser raises FileNotFoundError for a nonexistent path."""
     with pytest.raises(FileNotFoundError):
         FastaParser(empty_graph, "non_existent.fasta")
 
-def test_extract_id_uniprot():
-    with tempfile.NamedTemporaryFile(suffix='.fasta', delete=False) as tmp:
-        tmp_name = tmp.name
-    try:
-        parser = FastaParser(nx.DiGraph(), tmp_name)
-        header = ">sp|P12345|PROT1_HUMAN Protein 1"
-        assert parser._extract_id(header) == "P12345"
-    finally:
-        if os.path.exists(tmp_name):
-            os.remove(tmp_name)
 
-def test_extract_id_generic():
-    with tempfile.NamedTemporaryFile(suffix='.fasta', delete=False) as tmp:
-        tmp_name = tmp.name
-    try:
-        parser = FastaParser(nx.DiGraph(), tmp_name)
-        header = ">GeneID:12345 Description"
-        assert parser._extract_id(header) == "GeneID:12345"
-    finally:
-        if os.path.exists(tmp_name):
-            os.remove(tmp_name)
+@pytest.mark.unit
+def test_extract_id_uniprot_format(tmp_path):
+    """Verifies _extract_id parses a UniProt sp| header correctly."""
+    fasta_file = tmp_path / "dummy.fasta"
+    fasta_file.write_text("")
+    parser = FastaParser(nx.DiGraph(), str(fasta_file))
 
-def test_parse(empty_graph, sample_fasta):
-    parser = FastaParser(empty_graph, sample_fasta)
-    parser.parse()
-    
+    assert parser._extract_id(">sp|P12345|PROT1_HUMAN Protein 1") == "P12345"
+
+
+@pytest.mark.unit
+def test_extract_id_generic_format(tmp_path):
+    """Verifies _extract_id returns the first token for non-UniProt headers."""
+    fasta_file = tmp_path / "dummy.fasta"
+    fasta_file.write_text("")
+    parser = FastaParser(nx.DiGraph(), str(fasta_file))
+
+    assert parser._extract_id(">GeneID:12345 Description") == "GeneID:12345"
+
+
+@pytest.mark.unit
+def test_parse_adds_protein_nodes(empty_graph, tmp_path):
+    """Verifies that parse() adds correctly typed Protein nodes to the graph."""
+    fasta_file = tmp_path / "proteins.fasta"
+    fasta_file.write_text(
+        ">sp|P12345|PROT1_HUMAN Protein 1\n"
+        "MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF\n"
+        ">sp|P67890|PROT2_HUMAN Protein 2\n"
+        "MKAWLLLLLLVGLQSWYSGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF\n"
+    )
+
+    FastaParser(empty_graph, str(fasta_file)).parse()
+
     header1 = ">sp|P12345|PROT1_HUMAN Protein 1"
-    header2 = ">sp|P67890|PROT2_HUMAN Protein 2"
-    
     assert header1 in empty_graph.nodes
-    assert header2 in empty_graph.nodes
     assert empty_graph.nodes[header1]["type"] == "Protein"
-    assert "MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF" in empty_graph.nodes[header1]["sequence"]
+    assert "MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF" in (
+        empty_graph.nodes[header1]["sequence"]
+    )
 
-def test_parse_gzip(empty_graph):
-    import gzip
-    content = """>sp|P12345|PROT1_HUMAN Protein 1
-MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF
->sp|P67890|PROT2_HUMAN Protein 2
-MKAWLLLLLLVGLQSWYSGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF
-"""
-    with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.fasta.gz') as f:
-        f.write(gzip.compress(content.encode('utf-8')))
-        path = f.name
-        
-    try:
-        parser = FastaParser(empty_graph, path)
-        parser.parse()
-        
-        header1 = ">sp|P12345|PROT1_HUMAN Protein 1"
-        header2 = ">sp|P67890|PROT2_HUMAN Protein 2"
-        
-        assert header1 in empty_graph.nodes
-        assert header2 in empty_graph.nodes
-        assert empty_graph.nodes[header1]["type"] == "Protein"
-    finally:
-        if os.path.exists(path):
-            os.remove(path)
 
-def test_parse_duplicates_different_sequences(empty_graph):
-    content = """>sp|P1|NAME
-AAAAAA
->sp|P1|NAME
-BBBBBB
-"""
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.fasta') as f:
-        f.write(content)
-        path = f.name
-        
-    try:
-        parser = FastaParser(empty_graph, path)
-        parser.parse()
-        
-        assert ">sp|P1|NAME" in empty_graph.nodes
-        assert ">sp|P1$2|NAME" in empty_graph.nodes
-        assert empty_graph.nodes[">sp|P1|NAME"]["sequence"] == "AAAAAA"
-        assert empty_graph.nodes[">sp|P1$2|NAME"]["sequence"] == "BBBBBB"
-    finally:
-        if os.path.exists(path):
-            os.remove(path)
+@pytest.mark.unit
+def test_parse_gzip_file(empty_graph, tmp_path):
+    """Verifies that parse() handles gzip-compressed FASTA files correctly."""
+    content = (
+        ">sp|P12345|PROT1_HUMAN Protein 1\n"
+        "MKWVTFISLLLLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF\n"
+        ">sp|P67890|PROT2_HUMAN Protein 2\n"
+        "MKAWLLLLLLVGLQSWYSGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPF\n"
+    )
+    gz_file = tmp_path / "proteins.fasta.gz"
+    gz_file.write_bytes(gzip.compress(content.encode("utf-8")))
 
-def test_parse_duplicates_same_sequence(empty_graph):
-    content = """>sp|P1|NAME
-AAAAAA
->sp|P1|NAME
-AAAAAA
-"""
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.fasta') as f:
-        f.write(content)
-        path = f.name
-        
-    try:
-        parser = FastaParser(empty_graph, path)
-        parser.parse()
-        
-        assert len(empty_graph.nodes) == 1
-        assert ">sp|P1|NAME" in empty_graph.nodes
-    finally:
-        if os.path.exists(path):
-            os.remove(path)
+    FastaParser(empty_graph, str(gz_file)).parse()
+
+    assert ">sp|P12345|PROT1_HUMAN Protein 1" in empty_graph.nodes
+    assert ">sp|P67890|PROT2_HUMAN Protein 2" in empty_graph.nodes
+
+
+@pytest.mark.unit
+def test_parse_duplicate_headers_different_sequences(empty_graph, tmp_path):
+    """Verifies that duplicate headers with different sequences get disambiguated."""
+    fasta_file = tmp_path / "dupes.fasta"
+    fasta_file.write_text(
+        ">sp|P1|NAME\nAAAAAA\n"
+        ">sp|P1|NAME\nBBBBBB\n"
+    )
+
+    FastaParser(empty_graph, str(fasta_file)).parse()
+
+    assert ">sp|P1|NAME" in empty_graph.nodes
+    assert ">sp|P1$2|NAME" in empty_graph.nodes
+    assert empty_graph.nodes[">sp|P1|NAME"]["sequence"] == "AAAAAA"
+    assert empty_graph.nodes[">sp|P1$2|NAME"]["sequence"] == "BBBBBB"
+
+
+@pytest.mark.unit
+def test_parse_duplicate_headers_same_sequence(empty_graph, tmp_path):
+    """Verifies that exact duplicate entries (same header and sequence) are deduplicated."""
+    fasta_file = tmp_path / "exact_dupes.fasta"
+    fasta_file.write_text(
+        ">sp|P1|NAME\nAAAAAA\n"
+        ">sp|P1|NAME\nAAAAAA\n"
+    )
+
+    FastaParser(empty_graph, str(fasta_file)).parse()
+
+    assert len(empty_graph.nodes) == 1
+    assert ">sp|P1|NAME" in empty_graph.nodes

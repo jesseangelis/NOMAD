@@ -1,8 +1,6 @@
+"""Unit tests for nomad.utils.quantification_parser.QuantificationParser."""
 
-import os
-import tempfile
-
-import networkx as nx
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
@@ -10,89 +8,82 @@ import pytest
 from nomad.utils.quantification_parser import QuantificationParser
 
 
-@pytest.fixture
-def graph_with_peptides():
-    g = nx.DiGraph()
-    g.add_node("PEPTIDE1", type="Peptide")
-    g.add_node("PEPTIDE2", type="Peptide")
-    return g
-
-
-@pytest.fixture
-def fragpipe_file():
-    # Provide intensities across 3 distinct samples to satisfy >=3 precursor detection bounds
-    data = {
-        "Peptide Sequence": ["PEPTIDE1", "PEPTIDE1", "PEPTIDE2", "PEPTIDE3"],
-        "Charge": [2, 2, 3, 2], # Duplicate sequence+charge for aggregation test
-        "SampleA Intensity": [1000, 500, 3000, 4000],
-        "SampleB Intensity": [2000, 0, 3000, 4000],
-        "SampleC Intensity": [1500, 1500, 3000, 4000],
-    }
-    df = pd.DataFrame(data)
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-        df.to_csv(f, sep="\t", index=False)
-        path = f.name
-    yield path
-    os.remove(path)
-
-
-def test_init_filenotfound(graph_with_peptides):
+@pytest.mark.unit
+def test_init_raises_on_missing_file(graph_with_peptides):
+    """Verifies that QuantificationParser raises FileNotFoundError for a nonexistent path."""
     with pytest.raises(FileNotFoundError):
         QuantificationParser(graph_with_peptides, "non_existent.tsv")
 
 
-def test_invalid_format(graph_with_peptides):
-    df = pd.DataFrame({"Invalid Column": [1, 2, 3]})
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-        df.to_csv(f, sep="\t", index=False)
-        path = f.name
+@pytest.mark.unit
+def test_parse_raises_on_invalid_format(graph_with_peptides, tmp_path):
+    """Verifies that parse() raises ValueError for an unrecognised column layout."""
+    tsv_file = tmp_path / "bad.tsv"
+    pd.DataFrame({"Invalid Column": [1, 2, 3]}).to_csv(tsv_file, sep="\t", index=False)
 
-    parser = QuantificationParser(graph_with_peptides, path)
+    parser = QuantificationParser(graph_with_peptides, str(tsv_file))
     with pytest.raises(ValueError, match="Only FragPipe combined_ion.tsv format is supported."):
         parser.parse()
 
-    os.remove(path)
+
+@pytest.mark.unit
+def test_parse_fragpipe_adds_sample_nodes(graph_with_peptides, fragpipe_tsv):
+    """Verifies that parse() adds Sample nodes for each detected sample column."""
+    QuantificationParser(graph_with_peptides, fragpipe_tsv).parse()
+
+    assert "SampleA" in graph_with_peptides.nodes
+    assert graph_with_peptides.nodes["SampleA"]["type"] == "Sample"
+    assert "SampleB" in graph_with_peptides.nodes
+    assert "SampleC" in graph_with_peptides.nodes
 
 
-def test_parse_fragpipe_combined(graph_with_peptides, fragpipe_file):
-    parser = QuantificationParser(graph_with_peptides, fragpipe_file)
-    parser.parse()
+@pytest.mark.unit
+def test_parse_fragpipe_adds_precursor_nodes(graph_with_peptides, fragpipe_tsv):
+    """Verifies that parse() creates Precursor nodes with sequence_charge labels."""
+    QuantificationParser(graph_with_peptides, fragpipe_tsv).parse()
 
-    # Verify Samples added
-    assert "SampleA" in parser.g.nodes
-    assert parser.g.nodes["SampleA"]["type"] == "Sample"
-    assert "SampleB" in parser.g.nodes
-    assert "SampleC" in parser.g.nodes
-
-    # Verify Precursors purely by sequence and charge
-    assert "PEPTIDE1_2" in parser.g.nodes
-    assert parser.g.nodes["PEPTIDE1_2"]["type"] == "Precursor"
-    assert "PEPTIDE2_3" in parser.g.nodes
-
-    # PEPTIDE3 should be filtered out (not in original graph)
-    assert "PEPTIDE3_2" not in parser.g.nodes
-
-    # Verify edges and normalized aggregated intensities
-    # SampleA Median: median(500, 1000, 3000, 4000) = 2000
-    # SampleB Median: median(2000, 3000, 4000) = 3000 (0 is dropped)
-    # SampleC Median: median(1500, 1500, 3000, 4000) = 2250
-    # Global target: median(2000, 3000, 2250) = 2250
-    # Scale A: 2250 / 2000 = 1.125
-    # Scale B: 2250 / 3000 = 0.75
-    # PEPTIDE1_2 in SampleA: (1000 * 1.125) + (500 * 1.125) = 1687.5
-    # PEPTIDE1_2 in SampleB: (2000 * 0.75) + 0 = 1500.0
-    import numpy as np
-    assert ("PEPTIDE1", "PEPTIDE1_2") in parser.g.edges
-    assert np.isclose(parser.g.edges[("PEPTIDE1_2", "SampleA")]["intensity"], 1687.5)
-    assert np.isclose(parser.g.edges[("PEPTIDE1_2", "SampleB")]["intensity"], 1500.0)
+    assert "PEPTIDE1_2" in graph_with_peptides.nodes
+    assert graph_with_peptides.nodes["PEPTIDE1_2"]["type"] == "Precursor"
+    assert "PEPTIDE2_3" in graph_with_peptides.nodes
 
 
-def test_metadata_filtering(graph_with_peptides, fragpipe_file):
-    # Restrict metadata to only SampleA and SampleB
+@pytest.mark.unit
+def test_parse_fragpipe_filters_unknown_peptides(graph_with_peptides, fragpipe_tsv):
+    """Verifies that peptides absent from the graph are not added as precursors."""
+    QuantificationParser(graph_with_peptides, fragpipe_tsv).parse()
+
+    # PEPTIDE3 is not in graph_with_peptides, so no precursor node should exist
+    assert "PEPTIDE3_2" not in graph_with_peptides.nodes
+
+
+@pytest.mark.unit
+def test_parse_fragpipe_intensities_are_normalised(graph_with_peptides, fragpipe_tsv):
+    """Verifies that per-sample median normalisation is applied to edge intensities.
+
+    Expected normalisation (see fixture for raw values):
+      SampleA median: 2000  → scale 2250/2000 = 1.125
+      SampleB median: 3000  → scale 2250/3000 = 0.75
+      PEPTIDE1_2 in SampleA: (1000 + 500) * 1.125 = 1687.5
+      PEPTIDE1_2 in SampleB: 2000 * 0.75           = 1500.0
+    """
+    QuantificationParser(graph_with_peptides, fragpipe_tsv).parse()
+
+    assert ("PEPTIDE1", "PEPTIDE1_2") in graph_with_peptides.edges
+    assert np.isclose(
+        graph_with_peptides.edges[("PEPTIDE1_2", "SampleA")]["intensity"], 1687.5
+    )
+    assert np.isclose(
+        graph_with_peptides.edges[("PEPTIDE1_2", "SampleB")]["intensity"], 1500.0
+    )
+
+
+@pytest.mark.unit
+def test_parse_with_metadata_restricts_samples(graph_with_peptides, fragpipe_tsv):
+    """Verifies that passing metadata restricts parsing to the listed samples only."""
     metadata = pl.DataFrame({"sample": ["SampleA", "SampleB"]})
-    parser = QuantificationParser(graph_with_peptides, fragpipe_file, metadata=metadata)
+    parser = QuantificationParser(graph_with_peptides, fragpipe_tsv, metadata=metadata)
     parser.parse()
 
-    # Precursors will have <3 detections (only 2 valid samples left), so parsing yields empty graph updates
-    assert "SampleC" not in parser.g.nodes
-    assert "PEPTIDE1_2" not in parser.g.nodes
+    # Only two valid samples remain → fewer than three detections per precursor
+    assert "SampleC" not in graph_with_peptides.nodes
+    assert "PEPTIDE1_2" not in graph_with_peptides.nodes
