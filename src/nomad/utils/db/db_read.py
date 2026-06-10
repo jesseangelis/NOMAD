@@ -67,3 +67,26 @@ def load_emissions(db_path: str, proteins: Optional[List[str]] = None) -> pl.Dat
 
     with _connect(db_path) as conn:
         return pl.read_database(query, conn, execute_options={"parameters": params}, schema_overrides={"probability": pl.Float64})
+
+
+def load_raw_intensities(db_path: str, proteins: Optional[List[str]] = None) -> pl.DataFrame:
+    """Loads the long-format (raw) intensities from the database.
+
+    Args:
+        db_path: Path to the SQLite database.
+        proteins: Optional list of protein IDs to filter by.
+
+    Returns:
+        A DataFrame with columns: protein, gene_symbol, entry_name, description, sample, intensity, stderr, supported.
+    """
+    query = "SELECT * FROM intensities"
+    params = []
+    if proteins:
+        placeholders = ",".join("?" * len(proteins))
+        query += f" WHERE protein IN ({placeholders})"
+        params.extend(proteins)
+
+    ov = {"intensity": pl.Float64, "stderr": pl.Float64, "supported": pl.Int64}
+    with _connect(db_path) as conn:
+        return pl.read_database(query, conn, execute_options={"parameters": params}, schema_overrides=ov)
+
