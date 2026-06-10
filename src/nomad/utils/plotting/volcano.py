@@ -14,7 +14,7 @@ class VolcanoPlot:
     """Generates premium volcano plots for dose-response results."""
 
     @staticmethod
-    def plot_from_results(
+    def _plot_from_results(
         protein_df: pl.DataFrame, output_dir: Optional[str] = None, alpha: float = 0.05, lfc_threshold: float = 1.0,
     ) -> Optional[go.Figure]:
         if protein_df.is_empty(): return None
@@ -79,3 +79,14 @@ class VolcanoPlot:
             os.makedirs(output_dir, exist_ok=True)
             fig.write_html(os.path.join(output_dir, "volcano_plot_all_drugs.html"))
         return fig
+
+    @staticmethod
+    def plot(
+        db_path: str, output_dir: Optional[str] = None, alpha: float = 0.05, lfc_threshold: float = 1.0
+    ) -> Optional[go.Figure]:
+        """Generates premium volcano plots by loading dose-response results from the SQLite database."""
+        from nomad.utils import db
+        if not os.path.exists(db_path):
+            return None
+        protein_df = db.load_dose_response(db_path)
+        return VolcanoPlot._plot_from_results(protein_df, output_dir, alpha, lfc_threshold)

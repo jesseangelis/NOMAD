@@ -36,6 +36,10 @@ def init_db(db_path: str) -> None:
     Args:
         db_path: Filesystem path to the SQLite database file.
     """
+    import os
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     with _connect(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS intensities (
@@ -63,6 +67,16 @@ def init_db(db_path: str) -> None:
                 predicted REAL,
                 scale     REAL,
                 PRIMARY KEY (protein, sample, precursor)
+            );
+            CREATE TABLE IF NOT EXISTS dose_response (
+                protein TEXT NOT NULL,
+                drug TEXT NOT NULL,
+                log2fc REAL,
+                relevance_score REAL,
+                regulation TEXT,
+                p_val REAL,
+                gene_symbol TEXT,
+                PRIMARY KEY (protein, drug)
             );
         """)
     logger.debug("Database schema initialised at %s.", db_path)
@@ -141,3 +155,58 @@ def save_diagnostic_loo(
             "INSERT OR REPLACE INTO diagnostic_loo VALUES (?,?,?,?,?,?)", rows
         )
     logger.info("Saved %d diagnostic LOO rows to %s.", len(rows), db_path)
+
+
+def save_dose_response(db_path: str, df: pl.DataFrame) -> None:
+    """Saves dose-response fitting results to the database."""
+    import os
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+        
+    init_db(db_path)
+
+    # Standardize column names
+    col_mapping = {
+        "Name": "protein",
+        "Curve Fold Change": "log2fc",
+        "Curve Relevance Score": "relevance_score",
+        "Curve Regulation": "regulation",
+        "Curve Log P_Value": "p_val",
+    }
+    work_df = df.clone()
+    for k, v in col_mapping.items():
+        if k in work_df.columns and v not in work_df.columns:
+            work_df = work_df.rename({k: v})
+            
+    # Ensure we have the required columns
+    required_cols = ["protein", "drug", "log2fc", "relevance_score", "regulation", "p_val"]
+    for c in required_cols:
+        if c not in work_df.columns:
+            if c == "regulation":
+                work_df = work_df.with_columns(pl.lit("insignificant").alias(c))
+            elif c == "p_val":
+                work_df = work_df.with_columns(pl.lit(1.0).alias(c))
+            else:
+                work_df = work_df.with_columns(pl.lit(0.0).alias(c))
+                
+    gene_col = "gene_symbol" if "gene_symbol" in work_df.columns else "gene"
+    if gene_col in work_df.columns:
+        work_df = work_df.rename({gene_col: "gene_symbol"})
+    else:
+        if "gene_symbol" not in work_df.columns:
+            work_df = work_df.with_columns(pl.lit("").alias("gene_symbol"))
+        
+    rows = [
+        (r["protein"], r["drug"], float(r["log2fc"]) if r["log2fc"] is not None else 0.0,
+         float(r["relevance_score"]) if r["relevance_score"] is not None else 0.0,
+         r["regulation"], float(r["p_val"]) if r["p_val"] is not None else 1.0,
+         r["gene_symbol"])
+        for r in work_df.to_dicts()
+    ]
+    
+    with _connect(db_path) as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO dose_response VALUES (?,?,?,?,?,?,?)", rows
+        )
+    logger.info("Saved %d dose-response rows to %s.", len(rows), db_path)

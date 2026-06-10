@@ -90,3 +90,25 @@ def load_raw_intensities(db_path: str, proteins: Optional[List[str]] = None) -> 
     with _connect(db_path) as conn:
         return pl.read_database(query, conn, execute_options={"parameters": params}, schema_overrides=ov)
 
+
+def load_dose_response(db_path: str) -> pl.DataFrame:
+    """Loads dose-response fitting results from the database.
+
+    Args:
+        db_path: Path to the SQLite database.
+
+    Returns:
+        A DataFrame with columns matching the expected structure of VolcanoPlot.
+    """
+    query = "SELECT * FROM dose_response"
+    with _connect(db_path) as conn:
+        df = pl.read_database(query, conn)
+    # Rename/alias columns so they match VolcanoPlot input expected structure
+    if not df.is_empty():
+        df = df.rename({
+            "log2fc": "log2fc",
+            "relevance_score": "relevance_score",
+            "p_val": "p_val"
+        })
+    return df
+

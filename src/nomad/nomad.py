@@ -213,8 +213,8 @@ class Nomad:
         """
         if self._state < _State.FITTED:
             raise RuntimeError("Requires FITTED state.")
-        return StructuralEvidencePlot.plot_from_graph(
-            self.graph, protein, self.metadata, bottom_right, db_path=self.db_path
+        return StructuralEvidencePlot.plot(
+            self.db_path, protein, self.metadata, bottom_right
         )
 
     def plot_performance(self, output_dir: Optional[str] = "artifacts/plots") -> go.Figure:

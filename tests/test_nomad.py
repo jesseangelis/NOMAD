@@ -139,6 +139,52 @@ def test_plotting_api(mock_data, tmp_path):
     assert isinstance(fig_diag, go.Figure)
 
 
+def test_db_only_plotting(mock_data, tmp_path):
+    from nomad.utils.plotting.volcano import VolcanoPlot
+    from nomad.utils.plotting.structural import StructuralEvidencePlot
+    from nomad.utils.db.db_write import save_dose_response
+    
+    fasta_path, quant_path, samples, doses = mock_data
+    db_path = str(tmp_path / "test_db_plotting.sqlite")
+    nm = Nomad(num_workers=1, db_path=db_path)
+    nm.load_fasta(str(fasta_path))
+    nm.digest(enzyme="trypsin", min_pep_len=3)
+    nm.load_quantification(str(quant_path))
+    
+    meta_path = tmp_path / "metadata_plot.csv"
+    meta_df = pl.DataFrame({
+        "name": ["DrugA"] * 12,
+        "file": samples,
+        "dose": doses,
+        "unit": ["nM"] * 12
+    })
+    meta_df.write_csv(meta_path)
+    nm.set_metadata(str(meta_path))
+    nm.fit()
+    
+    # Check that structural plot can work by loading from DB
+    fig_struct = StructuralEvidencePlot.plot(db_path, "P12345", metadata=meta_df)
+    assert fig_struct is not None
+    assert isinstance(fig_struct, go.Figure)
+    
+    # Save dummy dose-response results
+    dose_resp_df = pl.DataFrame({
+        "protein": ["P12345"],
+        "drug": ["DrugA"],
+        "log2fc": [1.5],
+        "relevance_score": [3.0],
+        "regulation": ["up"],
+        "p_val": [0.001],
+        "gene_symbol": ["PROT1"]
+    })
+    save_dose_response(db_path, dose_resp_df)
+    
+    # Check that volcano plot can work by accessing the DB
+    fig_volcano = VolcanoPlot.plot(db_path, output_dir=str(tmp_path / "volcano_out"))
+    assert fig_volcano is not None
+    assert isinstance(fig_volcano, go.Figure)
+
+
 def test_diagnostic_loo_database(mock_data, tmp_path):
     import sqlite3
     fasta_path, quant_path, samples, doses = mock_data

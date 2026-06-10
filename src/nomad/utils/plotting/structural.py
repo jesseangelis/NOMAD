@@ -5,18 +5,63 @@ import os
 from typing import Any, Optional
 import networkx as nx, numpy as np, plotly.graph_objects as go, polars as pl
 from plotly.subplots import make_subplots
-import torch
 from nomad.utils import db, graph_ops
 from nomad.utils.header_parser import parse_uniprot_header
-from nomad.utils.nmf import averaging, optimizer
 from nomad.utils.plotting._helpers import clean_prot
+
+def build_graph_from_db(db_path: str) -> nx.Graph:
+    """Reconstructs the NetworkX graph structure from the database tables."""
+    import networkx as nx
+    from nomad.utils.db.db_write import _connect
+    
+    graph = nx.Graph()
+    
+    # 1. Load emissions (H-matrix structure)
+    with _connect(db_path) as conn:
+        emissions_df = pl.read_database("SELECT protein, precursor, probability FROM emissions", conn)
+        
+    for row in emissions_df.iter_rows(named=True):
+        prot = row["protein"]
+        prec = row["precursor"]
+        
+        # Add Protein, Peptide (virtual), and Precursor nodes
+        graph.add_node(prot, type="Protein")
+        pep = f"pep_{prec}"
+        graph.add_node(pep, type="Peptide")
+        graph.add_node(prec, type="Precursor")
+        
+        # Add edges
+        graph.add_edge(prec, pep, relation="HAS_PRECURSOR")
+        graph.add_edge(pep, prot, relation="PRODUCES")
+        
+    # 2. Load observed precursor intensities from diagnostic_loo
+    with _connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='diagnostic_loo'")
+        if cursor.fetchone() is not None:
+            loo_df = pl.read_database("SELECT sample, precursor, actual FROM diagnostic_loo", conn)
+            for row in loo_df.iter_rows(named=True):
+                sm = row["sample"]
+                prec = row["precursor"]
+                act = row["actual"]
+                
+                graph.add_node(sm, type="Sample")
+                graph.add_edge(prec, sm, relation="DETECTED_IN", intensity=act)
+                
+    return graph
+
 
 class StructuralEvidencePlot:
     @staticmethod
-    def plot_from_graph(
-        graph: Any, protein_match: str, metadata: Optional[pl.DataFrame] = None,
-        bottom_right: str = "reconstruction", lambda_reg: float = 0.1, db_path: Optional[str] = None,
+    def plot(
+        db_path: str, protein_match: str, metadata: Optional[pl.DataFrame] = None,
+        bottom_right: str = "reconstruction",
     ) -> Optional[go.Figure]:
+        if not os.path.exists(db_path):
+            return None
+            
+        graph = build_graph_from_db(db_path)
+            
         t_ids = protein_match.split("; ")
         t_node = next((n for n, d in graph.nodes(data=True) if d.get("type") == "Protein" and (any(i in n for i in t_ids) or parse_uniprot_header(n)[0] in t_ids)), None)
         if not t_node: return None
@@ -36,28 +81,23 @@ class StructuralEvidencePlot:
         p_keys = ["; ".join([parse_uniprot_header(pi)[0] for pi in g.split("; ")]) for g in grps]
 
         w_fit, h_fit = np.zeros((len(samples), len(grps))), np.zeros_like(h_msk, dtype=float)
-        if db_path and os.path.exists(db_path):
-            p_map, pr_map = {k: i for i, k in enumerate(p_keys)}, {p: j for j, p in enumerate(precs)}
-            
-            emissions_df = db.load_emissions(db_path, p_keys)
-            for row in emissions_df.iter_rows(named=True):
-                pk = row["protein"]
-                pr = row["precursor"]
-                prb = row["probability"]
-                if pk in p_map and pr in pr_map:
-                    h_fit[p_map[pk], pr_map[pr]] = prb
-            
-            intensities_df = db.load_raw_intensities(db_path, p_keys)
-            for row in intensities_df.iter_rows(named=True):
-                pk = row["protein"]
-                sm = row["sample"]
-                intn = row["intensity"]
-                if pk in p_map and sm in s2i:
-                    w_fit[s2i[sm], p_map[pk]] = intn
-        else:
-            dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            wf, hf, *_ = optimizer.optimize_component(v_raw / scale, h_msk, dev, lambda_reg, 10.0, 0.1, averaging.prepare_averaging_matrices(metadata, dev) if metadata is not None else {}, averaging.prepare_replicate_groups(metadata, dev) if metadata is not None else [], scale=scale)
-            w_fit, h_fit = wf * scale, h_msk * hf
+        p_map, pr_map = {k: i for i, k in enumerate(p_keys)}, {p: j for j, p in enumerate(precs)}
+        
+        emissions_df = db.load_emissions(db_path, p_keys)
+        for row in emissions_df.iter_rows(named=True):
+            pk = row["protein"]
+            pr = row["precursor"]
+            prb = row["probability"]
+            if pk in p_map and pr in pr_map:
+                h_fit[p_map[pk], pr_map[pr]] = prb
+        
+        intensities_df = db.load_raw_intensities(db_path, p_keys)
+        for row in intensities_df.iter_rows(named=True):
+            pk = row["protein"]
+            sm = row["sample"]
+            intn = row["intensity"]
+            if pk in p_map and sm in s2i:
+                w_fit[s2i[sm], p_map[pk]] = intn
 
         wh_fit, p_labels, p_order = w_fit @ h_fit, [clean_prot(g) for g in grps], list(range(len(grps)))
         if len(grps) > 1:
