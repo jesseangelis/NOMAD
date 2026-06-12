@@ -1,5 +1,7 @@
 """Unit tests for nomad.utils.nmf.worker."""
 
+from unittest.mock import MagicMock, patch
+
 import polars as pl
 import pytest
 
@@ -15,16 +17,14 @@ def minimal_meta():
 
 
 @pytest.mark.unit
-def test_run_worker_batch_without_init_returns_empty(mocker):
+def test_run_worker_batch_without_init_returns_empty():
     """Verifies that run_worker_batch returns empty lists when no engine is initialised."""
     from nomad.utils.nmf import worker
 
-    # Patch the module-level engine to None (no init called)
-    mocker.patch.object(worker, "_worker_engine", None)
-
-    q_list, e_list, n, cv_list, rep_list, rs_list = worker.run_worker_batch(
-        [{"component": "dummy"}]
-    )
+    with patch.object(worker, "_worker_engine", None):
+        q_list, e_list, n, cv_list, rep_list, rs_list = worker.run_worker_batch(
+            [{"component": "dummy"}]
+        )
 
     assert q_list == []
     assert e_list == []
@@ -33,23 +33,23 @@ def test_run_worker_batch_without_init_returns_empty(mocker):
 
 
 @pytest.mark.unit
-def test_run_worker_batch_delegates_to_engine(mocker, minimal_meta):
+def test_run_worker_batch_delegates_to_engine():
     """Verifies that run_worker_batch calls _fit_subset on the engine and returns its output."""
     from nomad.utils.nmf import worker
 
-    mock_engine = mocker.MagicMock()
+    mock_engine = MagicMock()
     mock_engine._fit_subset.return_value = (
-        [{"protein": "P1"}],  # q_list
-        [{"protein": "P1", "precursor": "Pre1", "probability": 0.9}],  # e_list
-        [],  # cv_list
-        [],  # rep_list
-        [],  # rs_list
+        [{"protein": "P1"}],
+        [{"protein": "P1", "precursor": "Pre1", "probability": 0.9}],
+        [],
+        [],
+        [],
     )
-    mocker.patch.object(worker, "_worker_engine", mock_engine)
 
-    q_list, e_list, n, cv_list, rep_list, rs_list = worker.run_worker_batch(
-        ["component_A", "component_B"]
-    )
+    with patch.object(worker, "_worker_engine", mock_engine):
+        q_list, e_list, n, cv_list, rep_list, rs_list = worker.run_worker_batch(
+            ["component_A", "component_B"]
+        )
 
     mock_engine._fit_subset.assert_called_once_with(
         ["component_A", "component_B"], show_progress=False
@@ -59,15 +59,15 @@ def test_run_worker_batch_delegates_to_engine(mocker, minimal_meta):
 
 
 @pytest.mark.unit
-def test_run_worker_batch_handles_runtime_error_gracefully(mocker):
+def test_run_worker_batch_handles_runtime_error_gracefully():
     """Verifies that a RuntimeError in the engine returns empty results rather than raising."""
     from nomad.utils.nmf import worker
 
-    mock_engine = mocker.MagicMock()
+    mock_engine = MagicMock()
     mock_engine._fit_subset.side_effect = RuntimeError("GPU exploded")
-    mocker.patch.object(worker, "_worker_engine", mock_engine)
 
-    q_list, e_list, n, cv_list, rep_list, rs_list = worker.run_worker_batch(["c1"])
+    with patch.object(worker, "_worker_engine", mock_engine):
+        q_list, e_list, n, cv_list, rep_list, rs_list = worker.run_worker_batch(["c1"])
 
     assert q_list == []
     assert e_list == []

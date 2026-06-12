@@ -23,25 +23,33 @@ def test_logistic_model_midpoint():
 
 
 @pytest.mark.unit
-def test_logistic_model_lower_asymptote():
-    """Verifies the 4PL model converges to c for very large x (downward curve)."""
+def test_logistic_model_converges_to_d_for_large_x():
+    """Verifies the 4PL model converges to d for very large x.
+
+    With b > 0, 10^(b(a-x)) → 0 as x → +∞, so the denominator → 1 and
+    f(x) → c + (d-c) / 1 = d.
+    """
     a, b, c, d = 0.0, 1.0, 0.1, 1.0
     x = np.array([100.0])  # far right of inflection point
 
     result = LogisticModel.core(x, a, b, c, d)
 
-    assert np.isclose(result[0], c, atol=1e-3)
+    assert np.isclose(result[0], d, atol=1e-3)
 
 
 @pytest.mark.unit
-def test_logistic_model_upper_asymptote():
-    """Verifies the 4PL model converges to d for very small x (downward curve)."""
+def test_logistic_model_converges_to_c_for_small_x():
+    """Verifies the 4PL model converges to c for very small x.
+
+    With b > 0, 10^(b(a-x)) → +∞ as x → -∞, so the denominator → ∞ and
+    f(x) → c + (d-c) / ∞ = c.
+    """
     a, b, c, d = 0.0, 1.0, 0.1, 1.0
     x = np.array([-100.0])  # far left of inflection point
 
     result = LogisticModel.core(x, a, b, c, d)
 
-    assert np.isclose(result[0], d, atol=1e-3)
+    assert np.isclose(result[0], c, atol=1e-3)
 
 
 @pytest.mark.unit
@@ -55,14 +63,17 @@ def test_logistic_model_returns_array():
 
 
 @pytest.mark.unit
-def test_logistic_model_monotone_decreasing():
-    """Verifies that the model is monotone decreasing for positive hill slope."""
+def test_logistic_model_monotone_increasing():
+    """Verifies that the model is monotone increasing for positive hill slope.
+
+    With b > 0, as x increases, the exponent b(a-x) becomes more negative,
+    so 10^(b(a-x)) decreases, the denominator decreases, and f(x) increases.
+    """
     a, b, c, d = 0.0, 1.0, 0.0, 1.0
     x = np.linspace(-3, 3, 50)
     result = LogisticModel.core(x, a, b, c, d)
 
-    # With b > 0, the 4PL is monotone decreasing
-    assert np.all(np.diff(result) <= 0)
+    assert np.all(np.diff(result) >= 0)
 
 
 # ---------------------------------------------------------------------------

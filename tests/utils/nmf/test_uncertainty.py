@@ -44,20 +44,19 @@ def test_calculate_uncertainty_skips_large_component():
 
 @pytest.mark.unit
 def test_calculate_uncertainty_detects_merge_pair_for_collinear_proteins():
-    """Verifies that two proteins with identical evidence columns are flagged for merging."""
-    n_s, n_p = 4, 2
-    # Two identical precursor columns → two proteins with perfectly correlated evidence
-    V = torch.tensor(
-        [[10.0, 10.0], [20.0, 20.0], [30.0, 30.0], [40.0, 40.0]],
-        dtype=torch.float32,
+    """Verifies that two proteins with highly correlated uncertainties are flagged for merging."""
+    M = torch.tensor([[0.12145286798477173, 0.5355274081230164, 0.15016603469848633], [0.4821828007698059, 0.18927443027496338, 0.6983774900436401]])
+    V = torch.tensor([[9.616996765136719, 7.094485282897949, 5.132293224334717], [7.242255687713623, 5.464740753173828, 0.05975782871246338], [9.32310962677002, 4.101711273193359, 7.291594505310059]])
+    w_opt = torch.tensor([[4.4590349197387695, 1.334875226020813], [0.5674946308135986, 4.362870216369629], [2.090116500854492, 0.42673230171203613]])
+    h_opt = torch.tensor([[3.6656389236450195, 4.869297981262207, 2.746314764022827]])
+    l_reg = 1.2156139146603279e-09
+
+    _, merge_pair = uncertainty.calculate_uncertainty(
+        w_opt, h_opt, V, M, lambda_reg=l_reg
     )
-    M = torch.ones((2, n_p), dtype=torch.float32)
-    w_opt = torch.sqrt(torch.tensor([[10.0, 10.0], [20.0, 20.0], [30.0, 30.0], [40.0, 40.0]], dtype=torch.float32))
-    h_opt = torch.sqrt(torch.ones((1, n_p), dtype=torch.float32))
 
-    _, merge_pair = uncertainty.calculate_uncertainty(w_opt, h_opt, V, M, lambda_reg=1e-3)
-
-    # With perfectly collinear proteins, a merge pair should be suggested
     assert merge_pair is not None
     assert isinstance(merge_pair, tuple)
     assert len(merge_pair) == 2
+
+
